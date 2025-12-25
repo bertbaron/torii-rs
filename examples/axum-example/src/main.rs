@@ -553,35 +553,7 @@ async fn index_handler(
 
         async function verifyMagicLink() {
             const token = document.getElementById('magic-token').value;
-            const statusDiv = document.getElementById('magic-verify-status');
-
-            if (!token) {
-                showStatus(statusDiv, 'Please enter a magic link token', 'error');
-                return;
-            }
-
-            try {
-                const response = await fetch('/auth/magic-link/verify', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ token }),
-                    credentials: 'include'
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    showStatus(statusDiv, 'Magic link verified! You are now logged in.', 'success');
-                    document.getElementById('magic-token').value = '';
-                    checkUserStatus();
-                } else {
-                    showStatus(statusDiv, data.error || 'Failed to verify magic link', 'error');
-                }
-            } catch (error) {
-                showStatus(statusDiv, 'Network error: ' + error.message, 'error');
-            }
+            window.location.href = `/auth/magic-link/verify?token=${encodeURIComponent(token)}`;
         }
 
         async function testEndpoint(endpoint) {

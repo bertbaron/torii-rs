@@ -18,6 +18,7 @@ tower = "0.5"
 thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+time = "0.3.44"
 
 [features]
 default = []

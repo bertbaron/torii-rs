@@ -1,5 +1,4 @@
-use std::sync::Arc;
-
+use axum::extract::Query;
 use axum::{
     Json, Router,
     extract::State,
@@ -7,10 +6,14 @@ use axum::{
     response::IntoResponse,
     routing::{delete, get, post},
 };
+use axum_extra::extract::cookie::Expiration;
 use axum_extra::extract::{
     CookieJar,
     cookie::{Cookie, SameSite},
 };
+use std::collections::HashMap;
+use std::sync::Arc;
+use time::Duration;
 use torii::Torii;
 use torii_core::RepositoryProvider;
 
@@ -331,7 +334,10 @@ where
 {
     Router::new()
         .route("/magic-link", post(request_magic_link_handler))
-        .route("/magic-link/verify", post(verify_magic_link_handler))
+        .route(
+            "/magic-link/verify",
+            get(verify_magic_link_handler).post(magic_link_login_handler),
+        )
 }
 
 #[cfg(feature = "magic-link")]
@@ -364,22 +370,128 @@ where
 
 #[cfg(feature = "magic-link")]
 async fn verify_magic_link_handler<R>(
-    State(state): State<Arc<Torii<R>>>,
+    State(_state): State<Arc<Torii<R>>>,
+    axum::Extension(link_config): axum::Extension<LinkConfig>,
     axum::Extension(cookie_config): axum::Extension<CookieConfig>,
-    connection_info: ConnectionInfo,
-    Json(payload): Json<VerifyMagicTokenRequest>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse>
 where
     R: RepositoryProvider,
 {
+    let token = params
+        .get("token")
+        .map(|s| s.to_string())
+        .ok_or(AuthError::BadRequest(
+            "Missing token query parameter".to_string(),
+        ))?;
+
+    // TODO: validate the token here also
+    // Better would be to generate a one-time auth code here or at least sign the token
+    // to further separate concerns and reduce attack surface.
+    let auth_code = token;
+
+    let magic_link_url_base = format!(
+        "{}{}/magic-link/verify",
+        link_config.hostname.trim_end_matches('/'),
+        link_config.path_prefix
+    );
+
+    let html_content = format!(
+        r#"
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Magic Link Verification</title>
+      </head>
+      <body>
+        <div id="status" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width:720px; margin:48px auto; padding:20px; text-align:center;">
+          <h2>Verifying magic link…</h2>
+          <p id="message">Please wait while we complete the login.</p>
+        </div>
+
+        <script>
+          (async function() {{
+            try {{
+              const res = await fetch("{0}", {{
+                method: "POST",
+                credentials: "include"
+              }});
+
+              if (res.ok) {{
+                document.getElementById('message').textContent = 'Login successful — you will be redirected shortly.';
+                document.getElementById('message').style.color = 'green';
+              }} else {{
+                let msg = res.statusText;
+                try {{
+                  const body = await res.json();
+                  msg = body.error || body.message || msg;
+                }} catch (e) {{ /* ignore JSON parse errors */ }}
+                document.getElementById('message').textContent = 'Login failed: ' + msg;
+                document.getElementById('message').style.color = 'red';
+              }}
+            }} catch (err) {{
+              document.getElementById('message').textContent = 'Network error: ' + (err && err.message ? err.message : String(err));
+              document.getElementById('message').style.color = 'red';
+            }}
+            setTimeout(() => window.location.href = '/', 2000);
+          }})();
+        </script>
+
+        <noscript>
+          <p>Please enable JavaScript and reload this page to complete verification.</p>
+          <form method="POST" action="{0}">
+            <button>Continue</button>
+          </form>
+        </noscript>
+      </body>
+    </html>
+    "#,
+        magic_link_url_base
+    );
+
+    let cookie_name = format!("{}_code", cookie_config.name);
+    let expires_at = time::OffsetDateTime::now_utc() + Duration::minutes(1);
+    let cookie = Cookie::build((cookie_name, auth_code.to_string()))
+        .path(cookie_config.path)
+        .http_only(true)
+        .secure(cookie_config.secure)
+        .same_site(SameSite::Strict)
+        .expires(Expiration::DateTime(expires_at));
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/html".to_string()),
+            (header::SET_COOKIE, cookie.to_string()),
+        ],
+        html_content,
+    ))
+}
+
+#[cfg(feature = "magic-link")]
+async fn magic_link_login_handler<R>(
+    State(state): State<Arc<Torii<R>>>,
+    jar: CookieJar,
+    axum::Extension(cookie_config): axum::Extension<CookieConfig>,
+    connection_info: ConnectionInfo,
+) -> Result<impl IntoResponse>
+where
+    R: RepositoryProvider,
+{
+    let cookie_name = format!("{}_code", cookie_config.name);
+    let auth_token =
+        jar.get(&cookie_name)
+            .map(|c| c.value().to_string())
+            .ok_or(AuthError::BadRequest(
+                "Missing magic auth cookie".to_string(),
+            ))?;
+
     let (user, session) = state
         .torii()
         .magic_link()
-        .authenticate(
-            &payload.token,
-            connection_info.user_agent,
-            connection_info.ip,
-        )
+        .authenticate(&auth_token, connection_info.user_agent, connection_info.ip)
         .await?;
 
     let same_site = match cookie_config.same_site {
