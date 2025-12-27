@@ -2,6 +2,7 @@ use crate::{Email, Mailer, MailerError};
 use async_trait::async_trait;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+use lettre::message::header::{HeaderName, HeaderValue};
 
 #[derive(Debug, Clone)]
 pub struct SmtpTransport {
@@ -121,8 +122,9 @@ fn build_message(email: Email) -> Result<Message, MailerError> {
         message_builder = message_builder.reply_to(reply_to.parse()?);
     }
 
-    // Add custom headers - lettre handles this differently, we'll skip custom headers for now
-    // Custom headers would need to be implemented with specific header types
+    for (name, value) in email.headers {
+        message_builder = message_builder.raw_header(HeaderValue::new(HeaderName::new_from_ascii(name.to_string()).unwrap(), value));
+    }
 
     // Build body - prefer HTML over text
     let message = if let Some(html) = email.html_body {
