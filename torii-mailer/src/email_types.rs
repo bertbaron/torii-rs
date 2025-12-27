@@ -28,6 +28,7 @@ impl MagicLinkEmail {
             .subject(format!("Sign in to {}", context.app_name))
             .html_body(html_body)
             .text_body(text_body)
+            .header("X-Entity-Ref-ID", magic_link.to_string()) // prevent threading on gmail and similar
             .build()
     }
 }
