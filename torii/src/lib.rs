@@ -511,6 +511,37 @@ impl<R: RepositoryProvider> Torii<R> {
             .map_err(|e| ToriiError::StorageError(e.to_string()))
     }
 
+    /// Update a user's information. Currently supports updating name and email.
+    ///
+    /// # Arguments
+    ///
+    /// * `user`: The user object with updated information
+    ///
+    /// # Returns
+    ///
+    /// Returns the updated user
+    pub async fn update_user(&self, user: &User) -> Result<User, ToriiError> {
+        let existing_user = self
+            .get_user(&user.id)
+            .await?
+            .ok_or_else(|| ToriiError::StorageError("User not found".to_string()))?;
+
+        // Create a new user object with updated fields
+        let updated_user = User {
+            id: existing_user.id.clone(),
+            email: user.email.clone(),
+            name: user.name.clone(),
+            email_verified_at: existing_user.email_verified_at,
+            created_at: existing_user.created_at,
+            updated_at: chrono::Utc::now(),
+        };
+
+        self.user_service
+            .update_user(&updated_user)
+            .await
+            .map_err(|e| ToriiError::StorageError(e.to_string()))
+    }
+
     /// Create a new session for a user
     ///
     /// # Arguments
