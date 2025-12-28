@@ -511,7 +511,7 @@ impl<R: RepositoryProvider> Torii<R> {
             .map_err(|e| ToriiError::StorageError(e.to_string()))
     }
 
-    /// Update a user's information. Currently supports updating name and email.
+    /// Update a user's information. Currently, supports updating name.
     ///
     /// # Arguments
     ///
@@ -527,7 +527,6 @@ impl<R: RepositoryProvider> Torii<R> {
             .ok_or_else(|| ToriiError::StorageError("User not found".to_string()))?;
 
         existing_user.name = user.name.clone();
-        existing_user.email = user.email.clone();
 
         self.user_service
             .update_user(&existing_user)
