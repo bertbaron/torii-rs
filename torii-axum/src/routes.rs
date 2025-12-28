@@ -500,10 +500,14 @@ where
         CookieSameSite::None => SameSite::None,
     };
 
+    let expires_at = time::OffsetDateTime::from_unix_timestamp(session.expires_at.timestamp())
+        .map_err(|e| AuthError::InternalError(format!("Invalid session expiry time: {}", e)))?;
+
     let cookie = Cookie::build((cookie_config.name, session.token.to_string()))
         .path(cookie_config.path)
         .http_only(cookie_config.http_only)
         .secure(cookie_config.secure)
+        .expires(Expiration::DateTime(expires_at))
         .same_site(same_site);
 
     Ok((
